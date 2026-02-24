@@ -2,7 +2,7 @@ import os
 import re
 
 def convert_txt_to_yaml():
-    desktop_path = r"C:\Users\TCACALDIR\Desktop\Deneme"
+    desktop_path = r"/home/muji/CLAB/acaldirlab/BGP_Practice_Labs/BGP_path_control"
     input_path   = os.path.join(desktop_path, "input.txt")
 
     cihaz_bilgisi      = {}
@@ -244,7 +244,7 @@ def convert_txt_to_yaml():
                         ansible_data[cihaz] = []
                     
                     ansible_data[cihaz].append({
-                        "name": port.replace('e', 'Ethernet').replace('Gi', 'GigabitEthernet'),
+                        "name": port.replace('ethernet', 'Ethernet').replace('Gi', 'GigabitEthernet'),
                         "ip":   ip,
                         "mask": mask,
                         "desc": f"TO_{hedef}",
@@ -258,7 +258,7 @@ def convert_txt_to_yaml():
         # ── Yazma Bölümü (döngü bittikten sonra) ──────────────────────────
 
         ans_path = os.path.join(desktop_path, "ansible")
-        for sub in ["vars", "inventory", "templates"]:
+        for sub in ["vars", "inventory", "templates","playbooks"]:
             os.makedirs(os.path.join(ans_path, sub), exist_ok=True)
 
         # Containerlab YAML
@@ -308,12 +308,43 @@ def convert_txt_to_yaml():
 
         # 6. interfaces.j2
         with open(os.path.join(ans_path, "templates", "interfaces.j2"), 'w') as f:
-            f.write("{% set router = inventory_hostname | upper %}\n")
+            f.write("line vty 0 4\n")
+            f.write(" exec-timeout 500 0\n")
+            f.write("!\n")
             f.write("{% for intf in network_config[inventory_hostname].interfaces %}\n")
-            f.write("interface {{ intf.name }}\n description {{ intf.desc }}\n")
-            f.write(" ip address {{ intf.ip }} {{ intf.mask }}\n no shutdown\n!\n{% endfor %}")
+            f.write("interface {{ intf.name }}\n")
+            f.write(" description {{ intf.desc }}\n")
+            f.write(" ip address {{ intf.ip }} {{ intf.mask }}\n")
+            f.write(" no shutdown\n")
+            f.write("!\n")
+            f.write("{% endfor %}")
 
-        print("Başarılı! Topoloji, Ansible Inventory, Değişkenler ve Template dosyaları oluşturuldu.")
+        # 7. configure_lab.yml (playbook) - dinamik, templates klasöründen okur
+        templates_path = os.path.join(ans_path, "templates")
+        j2_dosyalari = []
+        for dosya in os.listdir(templates_path):
+            if dosya.endswith(".j2"):
+                j2_dosyalari.append(dosya)
+        j2_dosyalari.sort()  # Loopback önce gelsin diye sıralama
+
+        with open(os.path.join(ans_path, "playbooks", "deploy.yml"), 'w') as f:
+            f.write("---\n")
+            f.write("- name: Configure Network Lab Devices\n")
+            f.write("  hosts: routers\n")
+            f.write("  gather_facts: no\n")
+            f.write("  vars_files:\n")
+            f.write("    - \"{{ playbook_dir }}/../vars/network_details.yml\"\n\n")
+            f.write("  tasks:\n\n")
+
+            for j2 in j2_dosyalari:
+                template_name = j2.replace(".j2", "")
+                f.write(f"    - name: Apply {template_name} configuration\n")
+                f.write("      cisco.ios.ios_config:\n")
+                f.write(f"        src: \"../templates/{j2}\"\n")
+                f.write("        match: none\n\n")
+
+
+        print("Başarılı! Topoloji, Ansible Inventory, Değişkenler, Template ve Playbook dosyaları oluşturuldu.")
 
     except Exception as e:
         print(f"Hata: {e}")
