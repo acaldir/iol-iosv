@@ -98,37 +98,13 @@ def format_iol_port(port: str, node_ismi: str, satir_numarasi: int) -> str:
 
     return f"ethernet{ethernet_port_degisimi}"
 
-
-def format_vios_port(port: str, node_ismi: str, satir_numarasi: int) -> str:
-
+def format_based_vios_port(port: str, node_ismi: str, satir_numarasi: int, vios_tipi) -> str:
     if re.match(r'(?i)^(ethernet|e)', port):
         raise ValueError(
             f"\n!!! PORT HATASI !!! Satır {satir_numarasi}: "
-            f"{node_ismi} '{port}' geçersiz. vIOS'da sadece GigabitEthernet portları kullanılabilir. Dogru yazim = g0/1 gibi"
+            f"{node_ismi} '{port}' geçersiz. {vios_tipi} cihazlarda sadece GigabitEthernet portları kullanılabilir. Dogru yazim = g0/1 gibi"
         )
     
-    gigabit_port_degisimi = port.lower().replace('Gi', '').replace('g', '')
-
-    if '/' in gigabit_port_degisimi:
-        parts = gigabit_port_degisimi.split('/')
-        slot, interfaces = int(parts[0]), int(parts[1])
-        return f"Gi{slot}/{interfaces}"
-
-    if gigabit_port_degisimi.isdigit():
-        return f"Gi/{gigabit_port_degisimi}"
-
-    raise ValueError(
-        f"\n!!! PORT HATASI !!! Satır {satir_numarasi}: "
-        f" {node_ismi} '{port}' geçersiz. vIOS'da GiX/Y formatında olmalıdır."
-    )
-
-def format_iosvl2_port(port: str, node_ismi: str, satir_numarasi: int) -> str:
-    if re.match(r'(?i)^(ethernet|e)', port):
-        raise ValueError(
-            f"\n!!! PORT HATASI !!! Satır {satir_numarasi}: "
-            f"{node_ismi} '{port}' geçersiz. vIOSL2'de sadece GigabitEthernet portları kullanılabilir. Dogru yazim = g0/1 gibi"
-        )
-
     gigabit_port_degisimi = port.lower().replace('Gi', '').replace('g', '')
 
     if '/' in gigabit_port_degisimi:
@@ -138,17 +114,17 @@ def format_iosvl2_port(port: str, node_ismi: str, satir_numarasi: int) -> str:
     
     if gigabit_port_degisimi.isdigit():
         return f"Gi/{gigabit_port_degisimi}"
-
+    
     raise ValueError(
         f"\n!!! PORT HATASI !!! Satır {satir_numarasi}: "
-        f" {node_ismi} '{port}' geçersiz. vIOSL2'de GiX/Y formatında olmalıdır."
+        f" {node_ismi} '{port}' geçersiz. {vios_tipi} cihazlarda GiX/Y formatında olmalıdır."
     )
 
 def format_port(port: str, node_ismi: str, satir_numarasi: int) -> str:
     if is_vios_router(node_ismi):
-        return format_vios_port(port, node_ismi, satir_numarasi)
+        return format_based_vios_port(port, node_ismi, satir_numarasi, "vIOS")
     elif is_viosl2_switch(node_ismi):
-        return format_iosvl2_port(port, node_ismi, satir_numarasi)
+        return format_based_vios_port(port, node_ismi, satir_numarasi, "vIOSL2")
     else:
         return format_iol_port(port, node_ismi, satir_numarasi)
 
@@ -157,7 +133,6 @@ def port_display(port: str, cihaz: str) -> str:
         return port
     else:
         return port.replace('ethernet', 'Ethernet', 1)
-
 
 # ── Dosya Okuma & Satır İşleme ─────────────────────────────────────────
 
