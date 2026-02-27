@@ -311,8 +311,8 @@ def ip_hesapla(cihaz1_adi, cihaz2_adi):
         if base is None:
             raise ValueError(f"Router IP atama hatası: '{cihaz1_adi}' ve '{cihaz2_adi}' kombinasyonu için başlangıç IP'si tanımlı değil!")
         
-        cihaz1_ip = f"{base}.{x}.{y}.1"
-        cihaz2_ip = f"{base}.{x}.{y}.2"
+        cihaz1_ip = f"10.{x}.{y}.1"
+        cihaz2_ip = f"10.{x}.{y}.2"
 
     elif (is_switch1 and is_router2) or (is_router1 and is_switch2):
         if is_switch1:
