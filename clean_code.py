@@ -25,7 +25,13 @@ EKIPMAN_CONFIGS = {
         "image":   "cisco_viosl2:15.2.2020",
         "type":    "switch",
         "mgmt_ip": "viosl2_switch_mgmt_ip",
-    }, 
+    },
+    "cSR": {
+        "kind":    "cisco_csr1000v",
+        "image":   "cisco_csr1000v:17.03.08",
+        "type":    None,
+        "mgmt_ip": "csr_router_mgmt_ip",
+    },
 }    
 
 mgmt_ip_artirimi = {
@@ -33,6 +39,25 @@ mgmt_ip_artirimi = {
     "iol_switch_mgmt_ip": 51,
     "vios_router_mgmt_ip": 71,
     "viosl2_switch_mgmt_ip": 91,
+    "csr_router_mgmt_ip": 121,
+}
+
+ROUTER_BASLANGIC_IP = {
+    ("R",   "R"):   10,
+    ("vR",  "vR"):  20,
+    ("cSR", "cSR"): 30,
+    ("R",   "vR"):  15,
+    ("vR",  "R"):   15,
+    ("R",   "cSR"): 25,
+    ("cSR", "R"):   25,
+    ("vR",  "cSR"): 35,
+    ("cSR", "vR"):  35,
+}
+
+SWITCH_ROUTER_BASLANGIC_IP = {
+    "R":   10,
+    "vR":  20,
+    "cSR": 30,
 }
 
 # ── Yardımcı Fonksiyonlar ──────────────────────────────────────────────
@@ -69,6 +94,8 @@ def is_vios_router(cihaz):
 def is_viosl2_switch(cihaz):
     return get_cihaz_prefix(cihaz) == "vSW"
 
+def is_csr_router(cihaz):
+    return get_cihaz_prefix(cihaz) == "cSR"
 
 def format_iol_port(port: str, node_ismi: str, satir_numarasi: int) -> str:
 
@@ -120,11 +147,34 @@ def format_based_vios_port(port: str, node_ismi: str, satir_numarasi: int, vios_
         f" {node_ismi} '{port}' geçersiz. {vios_tipi} cihazlarda GiX/Y formatında olmalıdır."
     )
 
+def format_csr_port(port: str, node_ismi: str, satir_numarasi: int) -> str:
+    if re.match(r'(?i)^(ethernet|e)', port):
+        raise ValueError(
+            f"\n!!! PORT HATASI !!! Satır {satir_numarasi}: "
+            f"{node_ismi} '{port}' geçersiz. CSR cihazlarda sadece GigabitEthernet portları kullanılabilir. Dogru yazim = g1,g2,g3.... gibi"
+        )
+    
+    gigabit_port_degisimi = port.lower().replace('Gi', '').replace('g', '')
+
+    if '/' in gigabit_port_degisimi:
+        interfaces = gigabit_port_degisimi.replace('/', 'Gi')
+        return f"Gi{interfaces}"
+    
+    if gigabit_port_degisimi.isdigit():
+        return f"{gigabit_port_degisimi}"
+    
+    raise ValueError(
+        f"\n!!! PORT HATASI !!! Satır {satir_numarasi}: "
+        f" {node_ismi} '{port}' geçersiz. CSR cihazlarda GiX formatında olmalıdır."
+    )
+
 def format_port(port: str, node_ismi: str, satir_numarasi: int) -> str:
     if is_vios_router(node_ismi):
         return format_based_vios_port(port, node_ismi, satir_numarasi, "vIOS")
     elif is_viosl2_switch(node_ismi):
         return format_based_vios_port(port, node_ismi, satir_numarasi, "vIOSL2")
+    elif is_csr_router(node_ismi):
+        return format_csr_port(port, node_ismi, satir_numarasi)
     else:
         return format_iol_port(port, node_ismi, satir_numarasi)
 
@@ -232,19 +282,23 @@ def dosyayi_isle(input_path):
 
     return topology_name, cihaz_bilgisi, links_lines, ansible_data
 
+# ── Router ve Switch baglantilari IP atama ─────────────────────────────────────────
+
+def get_router_base(cihaz1_adi, cihaz2_adi):
+    return ROUTER_BASLANGIC_IP.get(cihaz1_adi, cihaz2_adi)
 
 def ip_hesapla(cihaz1_adi, cihaz2_adi):
     cihaz1_ip = ""
     cihaz2_ip = ""
     mask      = "255.255.255.0"
 
-    input_prefix1 = get_cihaz_prefix(cihaz1_adi)
-    input_prefix2 = get_cihaz_prefix(cihaz2_adi)
+    input_cihaz1_prefix = get_cihaz_prefix(cihaz1_adi)
+    input_cihaz2_prefix = get_cihaz_prefix(cihaz2_adi)
 
-    is_router1 = input_prefix1 == "R" or input_prefix1 == "vR"
-    is_router2 = input_prefix2 == "R" or input_prefix2 == "vR"
-    is_switch1 = input_prefix1 == "SW"
-    is_switch2 = input_prefix2 == "SW"
+    is_router1 = input_cihaz1_prefix in ("R", "vR", "cSR")
+    is_router2 = input_cihaz2_prefix in ("R", "vR", "cSR")
+    is_switch1 = input_cihaz1_prefix in ("SW", "vSW")
+    is_switch2 = input_cihaz2_prefix in ("SW", "vSW")
 
     if is_router1 and is_router2:
         id1 = get_id(cihaz1_adi)
@@ -252,32 +306,42 @@ def ip_hesapla(cihaz1_adi, cihaz2_adi):
 
         x = min(id1, id2)
         y = max(id1, id2)
+        base = get_router_base(input_cihaz1_prefix, input_cihaz2_prefix)
 
-        cihaz1_ip = f"10.{x}.{y}.1"
-        cihaz2_ip = f"10.{x}.{y}.2"
+        if base is None:
+            raise ValueError(f"Router IP atama hatası: '{cihaz1_adi}' ve '{cihaz2_adi}' kombinasyonu için başlangıç IP'si tanımlı değil!")
+        
+        cihaz1_ip = f"{base}.{x}.{y}.1"
+        cihaz2_ip = f"{base}.{x}.{y}.2"
 
     elif (is_switch1 and is_router2) or (is_router1 and is_switch2):
         if is_switch1:
-            sw = cihaz1_adi
-            rt = cihaz2_adi
+            switch = cihaz1_adi
+            router = cihaz2_adi
+            router_prefix = input_cihaz2_prefix
         else:
-            sw = cihaz2_adi
-            rt = cihaz1_adi
+            switch = cihaz2_adi
+            router = cihaz1_adi
+            router_prefix = input_cihaz1_prefix
+            
+        switch_id = get_id(switch)
+        router_id = get_id(router)
 
-        sw_id = get_id(sw)
-        rt_id = get_id(rt)
+        base = SWITCH_ROUTER_BASLANGIC_IP.get(router_prefix)
 
+        if base is None:
+            raise ValueError(f"Switch-Router IP atama hatası: '{router}' için başlangıç IP'si tanımlı değil!")
+        
         switch_ip = ""
-        router_ip = f"10.100.{sw_id}.{rt_id}"
-        mask      = "255.255.255.240"
+        router_ip = f"{base}.100.{switch_id}.{router_id}"
 
-        if cihaz1_adi == sw:
+        if cihaz1_adi == switch:
             cihaz1_ip = switch_ip
-            cihaz2_ip = router_ip
+            cihaz2_ip = router_ip   
         else:
             cihaz1_ip = router_ip
             cihaz2_ip = switch_ip
-
+        
     return cihaz1_ip, cihaz2_ip, mask
 
 
@@ -315,17 +379,38 @@ def yaz_ansible_cfg(ans_path):
 
 
 def yaz_hosts_yml(ans_path, cihaz_bilgisi):
-    with open(os.path.join(ans_path, "inventory", "hosts.yml"), 'w') as f:
-        f.write("all:\n  vars:\n    ansible_connection: network_cli\n    ansible_network_os: cisco.ios.ios\n")
-        f.write("    ansible_user: admin\n    ansible_password: admin\n    ansible_httpapi_use_proxy: false\n")
-        f.write("    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'\n\n  children:\n")
-        for group, prefix in [("routers", "R"), ("switches", "S")]:
-            f.write(f"    {group}:\n      hosts:\n")
-            filtered = {k: v for k, v in cihaz_bilgisi.items() if k.upper().startswith(prefix)}
-            for node, info in sorted(filtered.items()):
-                id_key = "router_id" if prefix == "R" else "switch_id"
-                f.write(f"        {node}: {{ ansible_host: {info['mgmt_ipv4']}, {id_key}: {info['id']} }}\n")
+    header = """\
+all:
+  vars:
+    ansible_connection: network_cli
+    ansible_network_os: cisco.ios.ios
+    ansible_user: admin
+    ansible_password: admin
+    ansible_httpapi_use_proxy: false
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
 
+  children:
+"""
+    groups = {
+        "routers":      (("R", "vR", "cSR"), "router_id"),
+        "switches":     (("SW", "vSW"),  "switch_id"),
+    }
+
+    satir = [header]
+    for groupdaki_cihazlar, (prefix, id_atama) in groups.items():
+        satir.append(f"    {groupdaki_cihazlar}:\n      hosts:")
+
+        filtered_cihazlar = (
+            (input_cihaz_isimleri, atanacak_ip_adresi)
+            for input_cihaz_isimleri, atanacak_ip_adresi in sorted(cihaz_bilgisi.items())
+            if input_cihaz_isimleri.startswith(prefix )
+        )
+
+        for cihaz, info in filtered_cihazlar:
+            satir.append(f"        {cihaz}: {{ ansible_host: {info['mgmt_ipv4']}, {id_atama}: {info['id']} }}")
+
+    path_yolu = os.path.join(ans_path, "inventory", "hosts.yml")
+    open(path_yolu, 'w').write("\n".join(satir))   
 
 def yaz_loopback_j2(ans_path):
     with open(os.path.join(ans_path, "templates", "loopback.j2"), 'w') as f:
