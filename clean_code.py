@@ -340,7 +340,6 @@ def ip_hesapla(cihaz1_adi, cihaz2_adi):
     cihaz1_ip = ""
     cihaz2_ip = ""
     mask      = "255.255.255.0"
-    link_index = None          # ← YENİ
 
     input_cihaz1_prefix = get_cihaz_prefix(cihaz1_adi)
     input_cihaz2_prefix = get_cihaz_prefix(cihaz2_adi)
@@ -353,28 +352,36 @@ def ip_hesapla(cihaz1_adi, cihaz2_adi):
     if is_router1 and is_router2:
         id1 = get_id(cihaz1_adi)
         id2 = get_id(cihaz2_adi)
+
         x = min(id1, id2)
         y = max(id1, id2)
 
         base = get_router_base(input_cihaz1_prefix, input_cihaz2_prefix)
+
         if base is None:
             raise ValueError(f"Router IP atama hatası: '{cihaz1_adi}' ve '{cihaz2_adi}' kombinasyonu için başlangıç IP'si tanımlı değil!")
-        
-        yonlu_anahtar            = (id1, id2) # Yönlü anahtar: (R1, R2) ile (R2, R1) farklı sayılır
-        ilk_baglanti_ip_dagitimi = f"{base}.{id1}.{id2}"
 
-        router_link_sayaci[yonlu_anahtar] += 1
-        n = router_link_sayaci[yonlu_anahtar]
-        link_index = n - 1     # ← YENİ: buradan al
+        anahtar = (x, y)
+        router_link_sayaci[anahtar] += 1
+        n = router_link_sayaci[anahtar]
 
-        #ilk_baglanti_ip_dagitimi = f"{base}.{x}.{y}"
+        if n % 2 == 1:
+            ilk_baglanti_ip_dagitimi = f"{base}.{x}.{y}"
+        else:
+            ilk_baglanti_ip_dagitimi = f"{base}.{x}.{y}"
 
         router_baglanti_sayaci[ilk_baglanti_ip_dagitimi].append((cihaz1_adi, cihaz2_adi))
-        toplam = len(router_baglanti_sayaci[ilk_baglanti_ip_dagitimi])
+        #baglanti_index = len(router_baglanti_sayaci[ilk_baglanti_ip_dagitimi]) - 1
+        toplam         = len(router_baglanti_sayaci[ilk_baglanti_ip_dagitimi])
 
+        subnet_link_sayaci_anahtar = ilk_baglanti_ip_dagitimi
+        if len(router_baglanti_sayaci[subnet_link_sayaci_anahtar]) != toplam:
+            pass
+
+        
         for i, (c1, c2) in enumerate(router_baglanti_sayaci[ilk_baglanti_ip_dagitimi]):
-            yeni_ip1, yeni_ip2, yeni_subnetmask = subnet_hesapla(ilk_baglanti_ip_dagitimi, i, toplam)
 
+            yeni_ip1, yeni_ip2, yeni_subnetmask = subnet_hesapla(ilk_baglanti_ip_dagitimi, i, toplam)
             ip_id1 = get_id(c1)
             ip_id2 = get_id(c2)
 
@@ -382,32 +389,39 @@ def ip_hesapla(cihaz1_adi, cihaz2_adi):
                 guncellenmis_ipler[(c1, c2, i)] = (yeni_ip1, yeni_ip2, yeni_subnetmask)
             else:
                 guncellenmis_ipler[(c1, c2, i)] = (yeni_ip2, yeni_ip1, yeni_subnetmask)
-
-        cihaz1_ip, cihaz2_ip, mask = guncellenmis_ipler[(cihaz1_adi, cihaz2_adi, link_index)]
+        
+        cihaz1_ip, cihaz2_ip, mask = guncellenmis_ipler[(cihaz1_adi, cihaz2_adi, n - 1)]
 
     elif (is_switch1 and is_router2) or (is_router1 and is_switch2):
         if is_switch1:
-            switch, router = cihaz1_adi, cihaz2_adi
-            router_prefix  = input_cihaz2_prefix
+            switch = cihaz1_adi
+            router = cihaz2_adi
+            router_prefix = input_cihaz2_prefix
         else:
-            switch, router = cihaz2_adi, cihaz1_adi
-            router_prefix  = input_cihaz1_prefix
-
+            switch = cihaz2_adi
+            router = cihaz1_adi
+            router_prefix = input_cihaz1_prefix
+            
         switch_id = get_id(switch)
         router_id = get_id(router)
+
         base = SWITCH_ROUTER_BASLANGIC_IP.get(router_prefix)
+
         if base is None:
             raise ValueError(f"Switch-Router IP atama hatası: '{router}' için başlangıç IP'si tanımlı değil!")
-
+        
         switch_ip = ""
         router_ip = f"{base}.100.{switch_id}.{router_id}"
 
         if cihaz1_adi == switch:
-            cihaz1_ip, cihaz2_ip = switch_ip, router_ip
+            cihaz1_ip = switch_ip
+            cihaz2_ip = router_ip   
         else:
-            cihaz1_ip, cihaz2_ip = router_ip, switch_ip
+            cihaz1_ip = router_ip
+            cihaz2_ip = switch_ip
+        
+    return cihaz1_ip, cihaz2_ip, mask
 
-    return cihaz1_ip, cihaz2_ip, mask, link_index   # ← link_index eklendi
 # ── Yazma Fonksiyonları ────────────────────────────────────────────────
 
 def yaz_containerlab_yaml(desktop_path, topology_name, cihaz_bilgisi, links_lines):
