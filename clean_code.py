@@ -1,5 +1,6 @@
 import os
 import re
+from collections import defaultdict
 
 EKIPMAN_CONFIGS = {
     "SW": {
@@ -64,7 +65,6 @@ SWITCH_ROUTER_BASLANGIC_IP = {
 
 def get_id(name):
     return int(re.search(r'\d+', name).group())
-
 
 def get_cihaz_prefix(cihaz):
     cihaz_isimleri = re.match(r'[A-Za-z]+', cihaz).group()
@@ -198,6 +198,7 @@ def dosyayi_isle(input_path):
     topology_name      = "default_topology"
     kullanilan_portlar = {}
     ansible_data       = {}
+    ham_links          = []   # ← yeni: ham link kayıtları tutulacak
 
     with open(input_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
@@ -259,8 +260,31 @@ def dosyayi_isle(input_path):
                     "id":        get_id(cihaz),
                 }
 
-        cihaz1_ip, cihaz2_ip, mask = ip_hesapla(cihaz1_adi, cihaz2_adi)
+        # IP hesapla (guncellenmis_ipler'i günceller ama ansible_data'ya YOK)
+        ip_hesapla(cihaz1_adi, cihaz2_adi)
 
+        link_end_point1 = f"{cihaz1_adi}:{port_display(cihaz1_portu, cihaz1_adi)}"
+        link_end_point2 = f"{cihaz2_adi}:{port_display(cihaz2_portu, cihaz2_adi)}"
+        links_lines.append(f'    - endpoints: ["{link_end_point1 }", "{link_end_point2}"]')
+
+        # Ham kaydı sakla, sonra ansible_data dolduracağız
+        link_index = router_link_sayaci[(min(get_id(cihaz1_adi), get_id(cihaz2_adi)),
+                                  max(get_id(cihaz1_adi), get_id(cihaz2_adi)))] - 1
+        ham_links.append((cihaz1_adi, cihaz1_portu, cihaz2_adi, cihaz2_portu, link_index))
+
+    # ── Tüm IP'ler artık kesinleşti, ansible_data'yı şimdi doldur ──
+    for cihaz1_adi, cihaz1_portu, cihaz2_adi, cihaz2_portu, link_index in ham_links:
+
+        anahtar_d = (cihaz1_adi, cihaz2_adi, link_index)
+        anahtar_t = (cihaz2_adi, cihaz1_adi, link_index)
+
+        if anahtar_d in guncellenmis_ipler:
+            cihaz1_ip, cihaz2_ip, mask = guncellenmis_ipler[anahtar_d]
+        elif anahtar_t in guncellenmis_ipler:
+            cihaz2_ip, cihaz1_ip, mask = guncellenmis_ipler[anahtar_t]
+        else:
+            cihaz1_ip, cihaz2_ip, mask = "", "", "255.255.255.0"
+        
         for cihaz, port, ip, hedef in [
             (cihaz1_adi, cihaz1_portu, cihaz1_ip, cihaz2_adi),
             (cihaz2_adi, cihaz2_portu, cihaz2_ip, cihaz1_adi),
@@ -276,16 +300,41 @@ def dosyayi_isle(input_path):
                     "desc": f"TO_{hedef}",
                 })
 
-        link_end_point1 = f"{cihaz1_adi}:{port_display(cihaz1_portu, cihaz1_adi)}"
-        link_end_point2 = f"{cihaz2_adi}:{port_display(cihaz2_portu, cihaz2_adi)}"
-        links_lines.append(f'    - endpoints: ["{link_end_point1 }", "{link_end_point2}"]')
-
     return topology_name, cihaz_bilgisi, links_lines, ansible_data
-
 # ── Router ve Switch baglantilari IP atama ─────────────────────────────────────────
 
-def get_router_base(cihaz1_adi, cihaz2_adi):
-    return ROUTER_BASLANGIC_IP.get(cihaz1_adi, cihaz2_adi)
+router_baglanti_sayaci = defaultdict(list)   # anahtar: "base.x.y" → [(c1,c2), ...]
+router_link_sayaci     = defaultdict(int)    # anahtar: (x, y)     → bağlantı sayısı
+guncellenmis_ipler     = {}
+
+def CIDR_prefix_uzunluğunu_hesapla(prefix):
+    bits = (0xFFFFFFFF >> (32 - prefix)) << (32 - prefix)
+    return ".".join([str((bits >> (8 * i)) & 0xFF) for i in reversed(range(4))])
+
+def get_subnet_block_size(prefix):
+    return 2 ** (32 - prefix )
+
+def subnet_hesapla(ilk_baglanti_ip_dagitimi, baglanti_index, toplam_baglanti_sayisi):
+    """
+    ilk_baglanti_ip_dagitimi : "10.1.2"  (ilk /24 subnet'in ilk 3 okteti)
+    baglanti_index : 0'dan başlar (0 = 1. bağlantı, 1 = 2. bağlantı, ...)
+    toplam_baglanti_sayisi : o subnet'teki toplam bağlantı sayısı
+    """
+    if toplam_baglanti_sayisi == 1:
+        subnetmask = 24
+        network_baslangic = 0
+    else:
+        subnetmask = 25 + (toplam_baglanti_sayisi - 2)
+        block_size = get_subnet_block_size(subnetmask)
+        network_baslangic = (baglanti_index * block_size)
+    
+    mask = CIDR_prefix_uzunluğunu_hesapla(subnetmask)
+    cihaz1_ip_hesapla = f"{ilk_baglanti_ip_dagitimi}.{network_baslangic + 1}"
+    cihaz2_ip_hesapla = f"{ilk_baglanti_ip_dagitimi}.{network_baslangic + 2}"
+    return cihaz1_ip_hesapla, cihaz2_ip_hesapla, mask
+
+def get_router_base(cihaz1_prefix, cihaz2_prefix):
+    return ROUTER_BASLANGIC_IP.get((cihaz1_prefix, cihaz2_prefix))
 
 def ip_hesapla(cihaz1_adi, cihaz2_adi):
     cihaz1_ip = ""
@@ -306,13 +355,42 @@ def ip_hesapla(cihaz1_adi, cihaz2_adi):
 
         x = min(id1, id2)
         y = max(id1, id2)
+
         base = get_router_base(input_cihaz1_prefix, input_cihaz2_prefix)
 
         if base is None:
             raise ValueError(f"Router IP atama hatası: '{cihaz1_adi}' ve '{cihaz2_adi}' kombinasyonu için başlangıç IP'si tanımlı değil!")
+
+        anahtar = (x, y)
+        router_link_sayaci[anahtar] += 1
+        n = router_link_sayaci[anahtar]
+
+        if n % 2 == 1:
+            ilk_baglanti_ip_dagitimi = f"{base}.{x}.{y}"
+        else:
+            ilk_baglanti_ip_dagitimi = f"{base}.{x}.{y}"
+
+        router_baglanti_sayaci[ilk_baglanti_ip_dagitimi].append((cihaz1_adi, cihaz2_adi))
+        #baglanti_index = len(router_baglanti_sayaci[ilk_baglanti_ip_dagitimi]) - 1
+        toplam         = len(router_baglanti_sayaci[ilk_baglanti_ip_dagitimi])
+
+        subnet_link_sayaci_anahtar = ilk_baglanti_ip_dagitimi
+        if len(router_baglanti_sayaci[subnet_link_sayaci_anahtar]) != toplam:
+            pass
+
         
-        cihaz1_ip = f"10.{x}.{y}.1"
-        cihaz2_ip = f"10.{x}.{y}.2"
+        for i, (c1, c2) in enumerate(router_baglanti_sayaci[ilk_baglanti_ip_dagitimi]):
+
+            yeni_ip1, yeni_ip2, yeni_subnetmask = subnet_hesapla(ilk_baglanti_ip_dagitimi, i, toplam)
+            ip_id1 = get_id(c1)
+            ip_id2 = get_id(c2)
+
+            if ip_id1 <= ip_id2:
+                guncellenmis_ipler[(c1, c2, i)] = (yeni_ip1, yeni_ip2, yeni_subnetmask)
+            else:
+                guncellenmis_ipler[(c1, c2, i)] = (yeni_ip2, yeni_ip1, yeni_subnetmask)
+        
+        cihaz1_ip, cihaz2_ip, mask = guncellenmis_ipler[(cihaz1_adi, cihaz2_adi, n - 1)]
 
     elif (is_switch1 and is_router2) or (is_router1 and is_switch2):
         if is_switch1:
@@ -344,7 +422,6 @@ def ip_hesapla(cihaz1_adi, cihaz2_adi):
         
     return cihaz1_ip, cihaz2_ip, mask
 
-
 # ── Yazma Fonksiyonları ────────────────────────────────────────────────
 
 def yaz_containerlab_yaml(desktop_path, topology_name, cihaz_bilgisi, links_lines):
@@ -363,7 +440,6 @@ def yaz_containerlab_yaml(desktop_path, topology_name, cihaz_bilgisi, links_line
         f.write(f"\n  links:\n")
         f.write("\n".join(links_lines))
 
-
 def yaz_network_details(ans_path, ansible_data):
     with open(os.path.join(ans_path, "vars", "network_details.yml"), 'w') as f:
         f.write("loopback:\n  base: \"172.32\"\n  mask: \"255.255.255.0\"\n\nnetwork_config:\n")
@@ -372,11 +448,9 @@ def yaz_network_details(ans_path, ansible_data):
             for i in interfaces:
                 f.write(f"      - {{ name: \"{i['name']}\", ip: \"{i['ip']}\", mask: \"{i['mask']}\", desc: \"{i['desc']}\" }}\n")
 
-
 def yaz_ansible_cfg(ans_path):
     with open(os.path.join(ans_path, "ansible.cfg"), 'w') as f:
         f.write("[defaults]\nhost_key_checking = False\n")
-
 
 def yaz_hosts_yml(ans_path, cihaz_bilgisi):
     header = """\
@@ -417,7 +491,6 @@ def yaz_loopback_j2(ans_path):
         f.write("{% set id = inventory_hostname[1:] | int %}\n")
         f.write("interface Loopback1\n ip address {{ loopback.base }}.{{ id }}.{{ id }} {{ loopback.mask }}\n")
 
-
 def yaz_interfaces_j2(ans_path):
     with open(os.path.join(ans_path, "templates", "interfaces.j2"), 'w') as f:
         f.write("line vty 0 4\n")
@@ -430,7 +503,6 @@ def yaz_interfaces_j2(ans_path):
         f.write(" no shutdown\n")
         f.write("!\n")
         f.write("{% endfor %}")
-
 
 def yaz_deploy_yml(ans_path):
     templates_path = os.path.join(ans_path, "templates")
@@ -452,11 +524,9 @@ def yaz_deploy_yml(ans_path):
             f.write(f"        src: \"../templates/{j2}\"\n")
             f.write("        match: none\n\n")
 
-
 def ansible_klasorlerini_olustur(ans_path):
     for sub in ["vars", "inventory", "templates", "playbooks"]:
         os.makedirs(os.path.join(ans_path, sub), exist_ok=True)
-
 
 # ── Ana Fonksiyon ──────────────────────────────────────────────────────
 
@@ -486,7 +556,6 @@ def convert_txt_to_yaml():
 
     except Exception as e:
         print(f"Hata: {e}")
-
 
 if __name__ == "__main__":
     convert_txt_to_yaml()
