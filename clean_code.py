@@ -508,7 +508,9 @@ def yaz_deploy_yml(ans_path):
             f.write(f"    - name: Apply {template_name} configuration\n")
             f.write("      cisco.ios.ios_config:\n")
             f.write(f"        src: \"../templates/{j2}\"\n")
-            f.write("        match: none\n\n")
+            f.write("        match: none\n")
+            f.write("    - tags:\n")
+            f.write(f"        - {template_name}\n\n")
 
 def ansible_klasorlerini_olustur(ans_path):
     for sub in ["vars", "inventory", "templates", "playbooks"]:
