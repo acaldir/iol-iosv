@@ -192,6 +192,8 @@ def port_display(port: str, cihaz: str) -> str:
 def mgmt_port_map(cihaz):
     if is_vios_router(cihaz) or is_viosl2_switch(cihaz):
         return "Gi0"
+    elif is_csr_router(cihaz):
+        return "Gi1"
     else:
         return "Ethernet0/0"
 
@@ -543,7 +545,9 @@ def convert_txt_to_yaml():
         yaz_interfaces_j2(ans_path)
         yaz_deploy_yml(ans_path)
 
+        print("-----------------------------------------------------------------------------------------------")
         print("Başarılı! Topoloji, Ansible Inventory, Değişkenler, Template ve Playbook dosyaları oluşturuldu.")
+        print("-----------------------------------------------------------------------------------------------")
 
     except Exception as e:
         print(f"Hata: {e}")
