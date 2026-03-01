@@ -89,13 +89,13 @@ def normal_cihaz_adi(cihaz):
     return f"{input_harf_kismi}{input_sayi_kismi}"
 
 def is_vios_router(cihaz):
-    return get_cihaz_prefix(cihaz) == "vR"
+    return get_cihaz_prefix(cihaz) == "vR" or "VR" in cihaz.upper()
 
 def is_viosl2_switch(cihaz):
-    return get_cihaz_prefix(cihaz) == "vSW"
+    return get_cihaz_prefix(cihaz) == "vSW" or "VSW" in cihaz.upper()
 
 def is_csr_router(cihaz):
-    return get_cihaz_prefix(cihaz) == "cSR"
+    return get_cihaz_prefix(cihaz) == "cSR" or "CSR" in cihaz.upper()
 
 def format_iol_port(port: str, node_ismi: str, satir_numarasi: int) -> str:
 
@@ -129,7 +129,7 @@ def format_based_vios_port(port: str, node_ismi: str, satir_numarasi: int, vios_
     if re.match(r'(?i)^(ethernet|e)', port):
         raise ValueError(
             f"\n!!! PORT HATASI !!! Satır {satir_numarasi}: "
-            f"{node_ismi} '{port}' geçersiz. {vios_tipi} cihazlarda sadece GigabitEthernet portları kullanılabilir. Dogru yazim = g0/1 gibi"
+            f"{node_ismi} '{port}' geçersiz. {vios_tipi} cihazlarda sadece GigabitEthernet portları kullanılabilir. Dogru yazim = g2,g3 gibi"
         )
     
     gigabit_port_degisimi = port.lower().replace('Gi', '').replace('g', '')
@@ -140,32 +140,35 @@ def format_based_vios_port(port: str, node_ismi: str, satir_numarasi: int, vios_
         return f"Gi{interface_sirasi}"
     
     if gigabit_port_degisimi.isdigit():
-        return f"Gi/{gigabit_port_degisimi}"
+        return f"Gi{gigabit_port_degisimi}"
     
     raise ValueError(
         f"\n!!! PORT HATASI !!! Satır {satir_numarasi}: "
-        f" {node_ismi} '{port}' geçersiz. {vios_tipi} cihazlarda GiX/Y formatında olmalıdır."
+        f" {node_ismi} '{port}' geçersiz. {vios_tipi} cihazlarda GiX formatında olmalıdır.Dogru yazim = g2,g3 gibi"
     )
 
 def format_csr_port(port: str, node_ismi: str, satir_numarasi: int) -> str:
     if re.match(r'(?i)^(ethernet|e)', port):
         raise ValueError(
             f"\n!!! PORT HATASI !!! Satır {satir_numarasi}: "
-            f"{node_ismi} '{port}' geçersiz. CSR cihazlarda sadece GigabitEthernet portları kullanılabilir. Dogru yazim = g1,g2,g3.... gibi"
+            f"{node_ismi} '{port}' geçersiz. CSR cihazlarda sadece GigabitEthernet portları kullanılabilir. "
+            f"Dogru yazim = g1,g2,g3.... gibi"
         )
-    
-    gigabit_port_degisimi = port.lower().replace('Gi', '').replace('g', '')
 
-    if '/' in gigabit_port_degisimi:
-        interfaces = gigabit_port_degisimi.replace('/', 'Gi')
-        return f"Gi{interfaces}"
-    
-    if gigabit_port_degisimi.isdigit():
-        return f"{gigabit_port_degisimi}"
-    
+    # Strip 'gi' or 'g' prefix (case-insensitive)
+    normalized = port.lower()
+    if normalized.startswith('gi'):
+        normalized = normalized[2:]
+    elif normalized.startswith('g'):
+        normalized = normalized[1:]
+
+    # slot/port format: g0/1 → Gi0/1
+    if '/' in normalized or normalized.isdigit():
+        return f"Gi{normalized}"
+
     raise ValueError(
         f"\n!!! PORT HATASI !!! Satır {satir_numarasi}: "
-        f" {node_ismi} '{port}' geçersiz. CSR cihazlarda GiX formatında olmalıdır."
+        f"{node_ismi} '{port}' geçersiz. CSR cihazlarda GiX formatında olmalıdır."
     )
 
 def format_port(port: str, node_ismi: str, satir_numarasi: int) -> str:
@@ -188,7 +191,7 @@ def port_display(port: str, cihaz: str) -> str:
 
 def mgmt_port_map(cihaz):
     if is_vios_router(cihaz) or is_viosl2_switch(cihaz):
-        return "GigabitEthernet0/0"
+        return "Gi0"
     else:
         return "Ethernet0/0"
 
