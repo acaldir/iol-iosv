@@ -294,7 +294,7 @@ def dosyayi_isle(input_path):
             (cihaz1_adi, cihaz1_portu, cihaz1_ip, cihaz2_adi),
             (cihaz2_adi, cihaz2_portu, cihaz2_ip, cihaz1_adi),
         ]:
-            if get_cihaz_prefix(cihaz) in ["R", "vR"]:
+            if get_cihaz_prefix(cihaz) in ["R", "vR", "cSR"]:
                 if cihaz not in ansible_data:
                     ansible_data[cihaz] = []
 
